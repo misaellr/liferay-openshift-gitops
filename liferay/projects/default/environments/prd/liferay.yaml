@@ -1,14 +1,13 @@
 # OpenShift PRD Environment Overlay
-# Same as dev with production resources and replicas. Subdomain will change post-install.
+# Flat keys (chart deployed directly from OCI, not as subchart)
 
-liferay-default:
-  image:
-    tag: 2025.q1.12-lts
-  replicaCount: 2
-  resources:
-    limits:
-      cpu: "4"
-      memory: 12Gi
-    requests:
-      cpu: "2"
-      memory: 4Gi
+image:
+  tag: 2025.q1.12-lts
+replicaCount: 2
+resources:
+  limits:
+    cpu: '4'
+    memory: 12Gi
+  requests:
+    cpu: '2'
+    memory: 4Gi
