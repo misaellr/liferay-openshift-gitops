@@ -123,22 +123,22 @@ customEnv:
   - name: DATABASE_ENDPOINT
     valueFrom:
       secretKeyRef:
-        name: liferay-db-pguser-liferay
+        name: pgdb-pguser-liferay
         key: host
   - name: DATABASE_PORT
     valueFrom:
       secretKeyRef:
-        name: liferay-db-pguser-liferay
+        name: pgdb-pguser-liferay
         key: port
   - name: DATABASE_USERNAME
     valueFrom:
       secretKeyRef:
-        name: liferay-db-pguser-liferay
+        name: pgdb-pguser-liferay
         key: user
   - name: DATABASE_PASSWORD
     valueFrom:
       secretKeyRef:
-        name: liferay-db-pguser-liferay
+        name: pgdb-pguser-liferay
         key: password
   x-openshift-search:
   - name: OPENSEARCH_ENDPOINT
