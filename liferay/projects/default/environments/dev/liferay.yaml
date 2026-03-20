@@ -2,7 +2,7 @@
 # Flat keys (chart deployed directly from OCI, not as subchart)
 
 image:
-  tag: 2026.q1.0-lts
+  tag: 2025.q4.7
 podSecurityContext:
   runAsUser: 1000
   runAsGroup: 1000
