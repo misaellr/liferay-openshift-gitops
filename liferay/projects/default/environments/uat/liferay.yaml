@@ -1,0 +1,14 @@
+# OpenShift UAT Environment Overlay
+# Same as dev with higher resources. Subdomain will change post-install.
+
+liferay-default:
+  image:
+    tag: 2025.q1.12-lts
+  replicaCount: 1
+  resources:
+    limits:
+      cpu: "2"
+      memory: 8Gi
+    requests:
+      cpu: 500m
+      memory: 2Gi

@@ -1,0 +1,169 @@
+# OpenShift Dev Environment Overlay
+# Derived from liferay-aws/values.yaml with OpenShift adaptations.
+# All fixes from Run 1 (27 lessons) and validation agents applied.
+
+liferay-default:
+  image:
+    tag: 2025.q1.12-lts
+
+  # --- SCC: nonroot-v2 ---
+  podSecurityContext:
+    runAsUser: 1000
+    runAsGroup: 1000
+    runAsNonRoot: true
+    fsGroup: 1000
+    fsGroupChangePolicy: Always
+
+  securityContext:
+    runAsUser: 1000
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop:
+        - ALL
+    readOnlyRootFilesystem: false  # L-025: chart doesn't mount all writable paths
+
+  # --- SCC RBAC (chart path: global.liferayServiceAccount) ---
+  global:
+    liferayServiceAccount:
+      role:
+        rules:
+          - apiGroups: [""]
+            resources: ["configmaps"]
+            verbs: ["*"]
+          - apiGroups: ["security.openshift.io"]
+            resourceNames: ["nonroot-v2"]
+            resources: ["securitycontextconstraints"]
+            verbs: ["use"]
+
+  # --- Storage ---
+  volumeClaimTemplates:
+    - metadata:
+        name: liferay-persistent-volume
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        storageClassName: "gp3-csi"
+        resources:
+          requests:
+            storage: 20Gi
+
+  # --- S3 Overlay disabled (L-004) ---
+  overlay:
+    enabled: false
+
+  # --- Credential Bridge: Crunchy PGO Secret -> Liferay env vars ---
+  customEnv:
+    x-openshift-db:
+      - name: DATABASE_ENDPOINT
+        valueFrom:
+          secretKeyRef:
+            name: liferay-db-pguser-liferay
+            key: host
+      - name: DATABASE_PORT
+        valueFrom:
+          secretKeyRef:
+            name: liferay-db-pguser-liferay
+            key: port
+      - name: DATABASE_USERNAME
+        valueFrom:
+          secretKeyRef:
+            name: liferay-db-pguser-liferay
+            key: user
+      - name: DATABASE_PASSWORD
+        valueFrom:
+          secretKeyRef:
+            name: liferay-db-pguser-liferay
+            key: password
+    x-openshift-search:
+      - name: OPENSEARCH_ENDPOINT
+        value: "opensearch.liferay-dev.svc"
+      - name: OPENSEARCH_USERNAME
+        value: "admin"
+      - name: OPENSEARCH_PASSWORD
+        value: "admin"
+    x-license:
+      - name: LIFERAY_DISABLE_TRIAL_LICENSE
+        value: "true"
+
+  # --- Database (from AWS overlay, validated by Agent 2) ---
+  portalProperties: |
+    jdbc.default.driverClassName=org.postgresql.Driver
+    jdbc.default.url=jdbc:postgresql://${env.DATABASE_ENDPOINT}:${env.DATABASE_PORT}/lportal?useUnicode=true&characterEncoding=UTF-8&useFastDateParsing=false
+    jdbc.default.username=${env.DATABASE_USERNAME}
+    jdbc.default.password=${env.DATABASE_PASSWORD}
+    proxy.forwarded.for.header=X-Forwarded-For
+    proxy.forwarded.host.header=X-Forwarded-Host
+    proxy.forwarded.proto.header=X-Forwarded-Proto
+    web.server.forwarded.port.enabled=true
+    web.server.forwarded.protocol.enabled=true
+    web.server.protocol=https
+    web.server.https.port=443
+
+  # --- OpenSearch OSGi config (from AWS overlay, http:// per Agent 2 validation) ---
+  configmap:
+    data:
+      com.liferay.portal.search.opensearch2.configuration.OpenSearchConfiguration.config: |
+        remoteClusterConnectionId="REMOTE"
+      com.liferay.portal.search.opensearch2.configuration.OpenSearchConnectionConfiguration-REMOTE.config: |
+        active=B"true"
+        authenticationEnabled=B"false"
+        connectionId="REMOTE"
+        httpSSLEnabled=B"false"
+        networkHostAddresses=["http://opensearch.liferay-dev.svc:9200"]
+        password=""
+        username=""
+
+  # --- Mount OpenSearch OSGi configs (from AWS overlay) ---
+  customVolumeMounts:
+    x-opensearch:
+      - mountPath: /opt/liferay/osgi/configs/com.liferay.portal.search.opensearch2.configuration.OpenSearchConfiguration.config
+        name: liferay-configmap
+        subPath: com.liferay.portal.search.opensearch2.configuration.OpenSearchConfiguration.config
+      - mountPath: /opt/liferay/osgi/configs/com.liferay.portal.search.opensearch2.configuration.OpenSearchConnectionConfiguration-REMOTE.config
+        name: liferay-configmap
+        subPath: com.liferay.portal.search.opensearch2.configuration.OpenSearchConnectionConfiguration-REMOTE.config
+    x-license:
+      - mountPath: /etc/liferay/mount/files/deploy
+        name: license
+
+  # --- License volume (from official docs) ---
+  customVolumes:
+    x-license:
+      - name: license
+        secret:
+          secretName: liferay-license
+          items:
+            - key: license.xml
+              path: license.xml
+
+  # --- Bundle deny list (from AWS overlay, elasticsearch8 per L-024) ---
+  portalBundleDenyList:
+    - com.liferay.portal.search.elasticsearch.cross.cluster.replication.impl
+    - com.liferay.portal.search.elasticsearch.monitoring.web
+    - com.liferay.portal.search.elasticsearch8.api
+    - com.liferay.portal.search.elasticsearch8.impl
+    - com.liferay.portal.search.learning.to.rank.api
+    - com.liferay.portal.search.learning.to.rank.impl
+
+  # --- Resources (dev: lower than AWS overlay) ---
+  resources:
+    limits:
+      cpu: "2"
+      memory: 6Gi
+    requests:
+      cpu: 100m
+      memory: 1Gi
+
+  # --- Probes (generous for first boot, per L-023) ---
+  startupProbe:
+    failureThreshold: 180
+    initialDelaySeconds: 120
+    periodSeconds: 10
+  livenessProbe:
+    initialDelaySeconds: 0
+    periodSeconds: 30
+  readinessProbe:
+    initialDelaySeconds: 0
+    periodSeconds: 10
+
+  replicaCount: 1
