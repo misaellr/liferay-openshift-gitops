@@ -1,91 +1,15 @@
-# =============================================================================
-# OpenShift Dev Environment - Liferay DXP 2025.q4.12
-# =============================================================================
-# Flat keys: chart deployed directly from OCI, not as subchart (L-013, L-027)
-# Every setting annotated with rationale and confidence level.
-#
-# ANSWERS TO CRITICAL QUESTIONS:
-#
-# Q1: UID 1000 vs root?
-#   The Liferay DXP image sets USER 1000:1000 (L-001). The chart defaults to
-#   runAsUser: 1000 (confirmed in values.yaml line 242). cne-tests runs as
-#   root (UID 0) as a convenience, not a requirement. UID 1000 works and is
-#   required by OpenShift nonroot-v2 SCC.
-#   CONFIDENCE: HIGH (validated in q1 run, image unchanged for q4)
-#
-# Q2: Capabilities and readOnlyRootFilesystem?
-#   cne-tests drops NO capabilities and sets readOnlyRootFilesystem: false
-#   because EKS has no SCC enforcement. The chart default already drops ALL.
-#   readOnlyRootFilesystem: false is REQUIRED because Liferay writes to paths
-#   not covered by the chart's volume mounts (L-025: /opt/liferay/osgi/portal-war/,
-#   tomcat temp/work dirs, etc.). Dropping ALL capabilities is fine.
-#   CONFIDENCE: HIGH (L-025 validated this the hard way)
-#
-# Q3: OpenSearch module version?
-#   Both q4.11 and q4.12 modules exist on releases.liferay.com. The JARs are
-#   identical size (api: 386,433 bytes, impl: 102,900,473 bytes). Using q4.12
-#   modules to match the image tag. The upstream chart uses a containerTemplate
-#   that auto-resolves from .image.tag, which is the correct pattern.
-#   CONFIDENCE: HIGH (verified via HTTP, L-007 confirmed pattern)
-#
-# Q4: elasticsearch7 vs elasticsearch8 in deny list?
-#   The official docs ("2025 q4 and earlier") show elasticsearch7 because they
-#   cover a range of older versions. The upstream AWS overlay (latest) uses
-#   elasticsearch8. L-024 confirmed q1.12-lts ships elasticsearch8 bundles.
-#   q4.12 is newer than q1, so it also ships elasticsearch8.
-#   CONFIDENCE: HIGH (L-024, upstream overlay, both confirm elasticsearch8)
-#
-# Q5: Jakarta-specific changes?
-#   No Jakarta migration between q1 and q4. Jakarta EE 8 to 9.1 migration was
-#   in the 7.4 to 2024.q1 jump. Both q1 and q4 2025 are on the same Jakarta
-#   baseline. Portal properties syntax unchanged.
-#   CONFIDENCE: HIGH (no evidence of breaking changes in portal properties)
-#
-# Q6: Sidecar Elasticsearch prevention?
-#   The deny list IS sufficient. The sidecar Elasticsearch is a chart dependency
-#   that activates only when declared in dependencies. Chart v0.4.1 has no
-#   built-in Elasticsearch dependency. The portalBundleDenyList prevents the
-#   Elasticsearch connector OSGi bundles from loading, which is the correct
-#   mechanism for external OpenSearch.
-#   CONFIDENCE: HIGH (chart inspection confirms no ES dependency)
-#
-# Q7: PGO password with special chars?
-#   L-029 documented this. The jdbc-uri key from PGO contains a pre-built,
-#   properly-escaped JDBC URL. Using it directly avoids the interpolation
-#   problem entirely. However, Liferay's portal.properties interpolation
-#   syntax (${env.VARNAME}) doesn't support using a full JDBC URL from an
-#   env var for jdbc.default.url because the URL must be a literal string
-#   with only specific parts interpolated. The safest fix is to set a
-#   controlled password on the PGO user (no special chars) and keep the
-#   current pattern. We document the alternative below as a comment.
-#   CONFIDENCE: HIGH (L-029, validated fix)
-#
-# STOP CONDITIONS: None. All settings achievable via values overlay.
-# =============================================================================
+# OpenShift Dev - Liferay DXP 2025.q4.12 (embedded search)
+# OpenSearch connector modules incompatible with q4.12 runtime.
+# Using embedded search until compatible modules are available.
 
-# --- Image ---
-# CONFIDENCE: HIGH
-# Upgrade from q1.12-lts to q4.12.
 image:
-  tag: "2025.q4.12"
-
-# --- Pod Security Context ---
-# CONFIDENCE: HIGH (L-001, L-003)
-# UID 1000 matches Dockerfile USER directive. Full triad required for
-# nonroot-v2 SCC. fsGroupChangePolicy: Always ensures volume permissions
-# are set correctly on first mount.
+  tag: 2025.q4.12
 podSecurityContext:
   runAsUser: 1000
   runAsGroup: 1000
   runAsNonRoot: true
   fsGroup: 1000
   fsGroupChangePolicy: Always
-
-# --- Container Security Context ---
-# CONFIDENCE: HIGH (L-002, L-025)
-# allowPrivilegeEscalation: false required by nonroot-v2 SCC.
-# drop ALL is chart default and OpenShift best practice.
-# readOnlyRootFilesystem: false is REQUIRED (L-025).
 securityContext:
   runAsUser: 1000
   allowPrivilegeEscalation: false
@@ -93,11 +17,6 @@ securityContext:
     drop:
     - ALL
   readOnlyRootFilesystem: false
-
-# --- Storage ---
-# CONFIDENCE: HIGH (L-004)
-# gp3-csi is the OpenShift CSI storage class. 20Gi for dev.
-# overlay.enabled: false prevents S3 CSI driver template from rendering.
 volumeClaimTemplates:
 - metadata:
     name: liferay-persistent-volume
@@ -110,14 +29,6 @@ volumeClaimTemplates:
         storage: 20Gi
 overlay:
   enabled: false
-
-# --- Environment Variables (Credential Bridge) ---
-# CONFIDENCE: HIGH (L-029, L-031)
-# PGO Secret keys mapped to Liferay env vars.
-# NOTE: PGO password MUST be set to a controlled value (no special chars)
-# either via spec.users[].password or manual ALTER USER + Secret patch.
-# The jdbc-uri key exists in the PGO Secret but cannot be used directly
-# because portalProperties expects individual parts for interpolation.
 customEnv:
   x-openshift-db:
   - name: DATABASE_ENDPOINT
@@ -140,101 +51,37 @@ customEnv:
       secretKeyRef:
         name: pgdb-pguser-liferay
         key: password
-  x-openshift-search:
-  - name: OPENSEARCH_ENDPOINT
-    value: opensearch.liferay-dev.svc
-  - name: OPENSEARCH_USERNAME
-    value: admin
-  - name: OPENSEARCH_PASSWORD
-    value: admin
   x-license:
   - name: LIFERAY_DISABLE_TRIAL_LICENSE
-    value: "true"
+    value: 'true'
+portalProperties: 'jdbc.default.driverClassName=org.postgresql.Driver
 
-# --- Portal Properties ---
-# CONFIDENCE: HIGH (L-026, L-029)
-# JDBC connection using env var interpolation (${env.VARNAME} syntax).
-# Proxy headers required for OpenShift Route TLS termination (L-026).
-# company.default.web.id matches the Route hostname.
-portalProperties: |
-  jdbc.default.driverClassName=org.postgresql.Driver
   jdbc.default.url=jdbc:postgresql://${env.DATABASE_ENDPOINT}:${env.DATABASE_PORT}/lportal?useUnicode=true&characterEncoding=UTF-8&useFastDateParsing=false
+
   jdbc.default.username=${env.DATABASE_USERNAME}
+
   jdbc.default.password=${env.DATABASE_PASSWORD}
+
   proxy.forwarded.for.header=X-Forwarded-For
+
   proxy.forwarded.host.header=X-Forwarded-Host
+
   proxy.forwarded.proto.header=X-Forwarded-Proto
+
   web.server.forwarded.port.enabled=true
+
   web.server.forwarded.protocol.enabled=true
+
   web.server.protocol=https
+
   web.server.https.port=443
+
   company.default.web.id=liferay-default-liferay-dev.apps.openshift.misaelneto.com
+
   virtual.hosts.default.site.name=Guest
 
-# --- OpenSearch OSGi Configuration ---
-# CONFIDENCE: HIGH (official docs, upstream overlay)
-# authenticationEnabled=B"false" because our OpenSearch has DISABLE_SECURITY_PLUGIN=true (L-020).
-# networkHostAddresses uses http (not https) for same reason.
-configmap:
-  data:
-    com.liferay.portal.search.opensearch2.configuration.OpenSearchConfiguration.config: |
-      remoteClusterConnectionId="REMOTE"
-    com.liferay.portal.search.opensearch2.configuration.OpenSearchConnectionConfiguration-REMOTE.config: |
-      active=B"true"
-      authenticationEnabled=B"false"
-      connectionId="REMOTE"
-      httpSSLEnabled=B"false"
-      networkHostAddresses=["http://opensearch.liferay-dev.svc:9200"]
-      password=""
-      username=""
-
-# --- OpenSearch Module Init Container ---
-# CONFIDENCE: HIGH (L-007, verified q4.12 JARs exist on releases.liferay.com)
-# Uses containerTemplate so image tag auto-resolves from .image.tag.
-# This means changing image.tag above automatically updates the init container.
-# Downloads opensearch2 api + impl JARs that are NOT included in the DXP image.
-customInitContainers:
-  x-liferay-install-opensearch-modules:
-  - containerTemplate: |
-      - command:
-        - bash
-        - -c
-        - |
-          function download_module {
-              local product_version="{{ .image.tag }}"
-              local url="https://releases.liferay.com/opensearch2/dxp/${product_version}/com.liferay.portal.search.opensearch2.${1}.jar"
-              local http_code=$(curl --location --output-dir /temp/liferay/deploy --remote-name --retry 5 --retry-all-errors --retry-delay 2 --write-out "%{http_code}" "${url}")
-              if [ "${http_code}" != "200" ]; then
-                  echo "Unable to download OpenSearch modules for product version ${product_version}." >&2
-                  exit 1
-              fi
-          }
-          function main {
-              mkdir --parents /temp/liferay/deploy
-              rm --force --verbose "/temp/osgi/modules/com.liferay.portal.search.opensearch2"*
-              download_module "api"
-              download_module "impl"
-          }
-          main
-        image: {{ printf "%s:%s" .image.repository (.image.tag | toString) }}
-        imagePullPolicy: {{ .image.pullPolicy }}
-        name: liferay-install-opensearch-modules
-        volumeMounts:
-        - mountPath: /temp
-          name: liferay-persistent-volume
-
-# --- Volume Mounts (OSGi configs + license) ---
-# CONFIDENCE: HIGH (official docs, upstream overlay)
-# Mount the OpenSearch config files from the configmap into the OSGi configs dir.
-# Mount the license XML from a Secret into the deploy dir.
+  '
 customVolumeMounts:
-  x-opensearch:
-  - mountPath: /opt/liferay/osgi/configs/com.liferay.portal.search.opensearch2.configuration.OpenSearchConfiguration.config
-    name: liferay-configmap
-    subPath: com.liferay.portal.search.opensearch2.configuration.OpenSearchConfiguration.config
-  - mountPath: /opt/liferay/osgi/configs/com.liferay.portal.search.opensearch2.configuration.OpenSearchConnectionConfiguration-REMOTE.config
-    name: liferay-configmap
-    subPath: com.liferay.portal.search.opensearch2.configuration.OpenSearchConnectionConfiguration-REMOTE.config
   x-license:
   - mountPath: /etc/liferay/mount/files/deploy
     name: license
@@ -246,37 +93,13 @@ customVolumes:
       items:
       - key: license.xml
         path: license.xml
-
-# --- Elasticsearch Bundle Deny List ---
-# CONFIDENCE: HIGH (L-024, upstream overlay confirms elasticsearch8 for 2025.q4)
-# Prevents sidecar Elasticsearch connector bundles from loading.
-# Must use elasticsearch8 (not elasticsearch7) for 2025.q1+ images.
-portalBundleDenyList:
-- com.liferay.portal.search.elasticsearch.cross.cluster.replication.impl
-- com.liferay.portal.search.elasticsearch.monitoring.web
-- com.liferay.portal.search.elasticsearch8.api
-- com.liferay.portal.search.elasticsearch8.impl
-- com.liferay.portal.search.learning.to.rank.api
-- com.liferay.portal.search.learning.to.rank.impl
-
-# --- Resources ---
-# CONFIDENCE: MEDIUM
-# Sized for dev/PoC. Upstream uses 4 CPU / 12Gi. We use 2 CPU / 6Gi to
-# stay within trial cluster limits. requests are low to allow scheduling
-# on constrained nodes. May need tuning based on actual usage.
 resources:
   limits:
-    cpu: "2"
+    cpu: '2'
     memory: 6Gi
   requests:
     cpu: 100m
     memory: 1Gi
-
-# --- Probes ---
-# CONFIDENCE: HIGH
-# startupProbe: 180 failures * 10s = 30 min max startup time.
-# initialDelaySeconds: 120 gives the JVM and init containers time.
-# livenessProbe and readinessProbe use chart defaults with minor tuning.
 startupProbe:
   failureThreshold: 180
   initialDelaySeconds: 120
@@ -287,23 +110,17 @@ livenessProbe:
 readinessProbe:
   initialDelaySeconds: 0
   periodSeconds: 10
-
 replicaCount: 1
-
-# --- RBAC ---
-# CONFIDENCE: HIGH (L-014)
-# global.liferayServiceAccount.role.rules is the correct path for chart v0.4.1.
-# ConfigMap access needed for the k8s agent. SCC use binding needed for nonroot-v2.
 global:
   liferayServiceAccount:
     role:
       rules:
       - apiGroups:
-        - ""
+        - ''
         resources:
         - configmaps
         verbs:
-        - "*"
+        - '*'
       - apiGroups:
         - security.openshift.io
         resourceNames:
