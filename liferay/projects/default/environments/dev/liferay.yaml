@@ -1,131 +1,152 @@
-# OpenShift Dev - Liferay DXP 2025.q4.12 (embedded search)
-# OpenSearch connector modules incompatible with q4.12 runtime.
-# Using embedded search until compatible modules are available.
+# OpenShift Dev - 2025.q4.12-slim
+# Based on proven cne-tests config + OpenShift SCC adaptations
 
 image:
-  tag: 2025.q4.12
+  tag: "2025.q4.12-slim"
+
+# SCC: nonroot-v2
 podSecurityContext:
   runAsUser: 1000
   runAsGroup: 1000
   runAsNonRoot: true
   fsGroup: 1000
   fsGroupChangePolicy: Always
+
 securityContext:
   runAsUser: 1000
   allowPrivilegeEscalation: false
   capabilities:
     drop:
-    - ALL
+      - ALL
   readOnlyRootFilesystem: false
-volumeClaimTemplates:
-- metadata:
-    name: liferay-persistent-volume
-  spec:
-    accessModes:
-    - ReadWriteOnce
-    storageClassName: gp3-csi
-    resources:
-      requests:
-        storage: 20Gi
-overlay:
-  enabled: false
-customEnv:
-  x-openshift-db:
-  - name: DATABASE_ENDPOINT
-    valueFrom:
-      secretKeyRef:
-        name: pgdb-pguser-liferay
-        key: host
-  - name: DATABASE_PORT
-    valueFrom:
-      secretKeyRef:
-        name: pgdb-pguser-liferay
-        key: port
-  - name: DATABASE_USERNAME
-    valueFrom:
-      secretKeyRef:
-        name: pgdb-pguser-liferay
-        key: user
-  - name: DATABASE_PASSWORD
-    valueFrom:
-      secretKeyRef:
-        name: pgdb-pguser-liferay
-        key: password
-  x-license:
-  - name: LIFERAY_DISABLE_TRIAL_LICENSE
-    value: 'true'
-portalProperties: 'jdbc.default.driverClassName=org.postgresql.Driver
 
-  jdbc.default.url=jdbc:postgresql://${env.DATABASE_ENDPOINT}:${env.DATABASE_PORT}/lportal?useUnicode=true&characterEncoding=UTF-8&useFastDateParsing=false
-
-  jdbc.default.username=${env.DATABASE_USERNAME}
-
-  jdbc.default.password=${env.DATABASE_PASSWORD}
-
-  proxy.forwarded.for.header=X-Forwarded-For
-
-  proxy.forwarded.host.header=X-Forwarded-Host
-
-  proxy.forwarded.proto.header=X-Forwarded-Proto
-
-  web.server.forwarded.port.enabled=true
-
-  web.server.forwarded.protocol.enabled=true
-
-  web.server.protocol=https
-
-  web.server.https.port=443
-
-  company.default.web.id=liferay-default-liferay-dev.apps.openshift.misaelneto.com
-
-  virtual.hosts.default.site.name=Guest
-
-  '
-customVolumeMounts:
-  x-license:
-  - mountPath: /etc/liferay/mount/files/deploy
-    name: license
-customVolumes:
-  x-license:
-  - name: license
-    secret:
-      secretName: liferay-license
-      items:
-      - key: license.xml
-        path: license.xml
-resources:
-  limits:
-    cpu: '2'
-    memory: 6Gi
-  requests:
-    cpu: 100m
-    memory: 1Gi
-startupProbe:
-  failureThreshold: 180
-  initialDelaySeconds: 120
-  periodSeconds: 10
-livenessProbe:
-  initialDelaySeconds: 0
-  periodSeconds: 30
-readinessProbe:
-  initialDelaySeconds: 0
-  periodSeconds: 10
-replicaCount: 1
+# SCC RBAC
 global:
   liferayServiceAccount:
     role:
       rules:
-      - apiGroups:
-        - ''
-        resources:
-        - configmaps
-        verbs:
-        - '*'
-      - apiGroups:
-        - security.openshift.io
-        resourceNames:
-        - nonroot-v2
-        resources:
-        - securitycontextconstraints
-        verbs:
-        - use
+        - apiGroups: [""]
+          resources: ["configmaps"]
+          verbs: ["*"]
+        - apiGroups: ["security.openshift.io"]
+          resourceNames: ["nonroot-v2"]
+          resources: ["securitycontextconstraints"]
+          verbs: ["use"]
+
+# Storage
+volumeClaimTemplates:
+  - metadata:
+      name: liferay-persistent-volume
+    spec:
+      accessModes:
+        - ReadWriteOnce
+      storageClassName: "gp3-csi"
+      resources:
+        requests:
+          storage: 20Gi
+
+overlay:
+  enabled: false
+
+# Credential bridge (pgdb, not liferay-db to avoid LIFERAY_* collision L-031)
+customEnv:
+  x-openshift-db:
+    - name: DATABASE_ENDPOINT
+      valueFrom:
+        secretKeyRef:
+          name: pgdb-pguser-liferay
+          key: host
+    - name: DATABASE_PORT
+      valueFrom:
+        secretKeyRef:
+          name: pgdb-pguser-liferay
+          key: port
+    - name: DATABASE_USERNAME
+      valueFrom:
+        secretKeyRef:
+          name: pgdb-pguser-liferay
+          key: user
+    - name: DATABASE_PASSWORD
+      valueFrom:
+        secretKeyRef:
+          name: pgdb-pguser-liferay
+          key: password
+  x-openshift-search:
+    - name: OPENSEARCH_ENDPOINT
+      value: "opensearch.liferay-dev.svc"
+    - name: OPENSEARCH_USERNAME
+      value: "admin"
+    - name: OPENSEARCH_PASSWORD
+      value: "admin"
+  x-license:
+    - name: LIFERAY_DISABLE_TRIAL_LICENSE
+      value: "true"
+
+# Database
+portalProperties: |
+  jdbc.default.driverClassName=org.postgresql.Driver
+  jdbc.default.url=jdbc:postgresql://${env.DATABASE_ENDPOINT}:${env.DATABASE_PORT}/lportal?useUnicode=true&characterEncoding=UTF-8&useFastDateParsing=false
+  jdbc.default.username=${env.DATABASE_USERNAME}
+  jdbc.default.password=${env.DATABASE_PASSWORD}
+  proxy.forwarded.for.header=X-Forwarded-For
+  proxy.forwarded.host.header=X-Forwarded-Host
+  proxy.forwarded.proto.header=X-Forwarded-Proto
+  web.server.forwarded.port.enabled=true
+  web.server.forwarded.protocol.enabled=true
+  web.server.protocol=https
+  web.server.https.port=443
+  company.default.web.id=liferay-default-liferay-dev.apps.openshift.misaelneto.com
+  virtual.hosts.default.site.name=Guest
+
+# OpenSearch OSGi config
+configmap:
+  data:
+    com.liferay.portal.search.opensearch2.configuration.OpenSearchConfiguration.config: |
+      remoteClusterConnectionId="REMOTE"
+    com.liferay.portal.search.opensearch2.configuration.OpenSearchConnectionConfiguration-REMOTE.config: |
+      active=B"true"
+      authenticationEnabled=B"false"
+      connectionId="REMOTE"
+      httpSSLEnabled=B"false"
+      networkHostAddresses=["http://opensearch.liferay-dev.svc:9200"]
+      password=""
+      username=""
+
+customVolumeMounts:
+  x-opensearch:
+    - mountPath: /opt/liferay/osgi/configs/com.liferay.portal.search.opensearch2.configuration.OpenSearchConfiguration.config
+      name: liferay-configmap
+      subPath: com.liferay.portal.search.opensearch2.configuration.OpenSearchConfiguration.config
+    - mountPath: /opt/liferay/osgi/configs/com.liferay.portal.search.opensearch2.configuration.OpenSearchConnectionConfiguration-REMOTE.config
+      name: liferay-configmap
+      subPath: com.liferay.portal.search.opensearch2.configuration.OpenSearchConnectionConfiguration-REMOTE.config
+  x-license:
+    - mountPath: /etc/liferay/mount/files/deploy
+      name: license
+
+customVolumes:
+  x-license:
+    - name: license
+      secret:
+        secretName: liferay-license
+        items:
+          - key: license.xml
+            path: license.xml
+
+portalBundleDenyList:
+  - com.liferay.portal.search.elasticsearch.cross.cluster.replication.impl
+  - com.liferay.portal.search.elasticsearch.monitoring.web
+  - com.liferay.portal.search.elasticsearch8.api
+  - com.liferay.portal.search.elasticsearch8.impl
+  - com.liferay.portal.search.learning.to.rank.api
+  - com.liferay.portal.search.learning.to.rank.impl
+
+resources:
+  limits:
+    cpu: "2"
+    memory: 6Gi
+  requests:
+    cpu: 100m
+    memory: 1Gi
+
+replicaCount: 1
