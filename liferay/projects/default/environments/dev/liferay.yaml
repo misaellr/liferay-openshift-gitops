@@ -82,6 +82,10 @@ portalProperties: 'jdbc.default.driverClassName=org.postgresql.Driver
 
   web.server.https.port=443
 
+  company.default.web.id=liferay-default-liferay-dev.apps.openshift.misaelneto.com
+
+  virtual.hosts.default.site.name=Guest
+
   '
 configmap:
   data:
