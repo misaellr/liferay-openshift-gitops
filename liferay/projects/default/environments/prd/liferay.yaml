@@ -2,7 +2,7 @@
 # Flat keys (chart deployed directly from OCI, not as subchart)
 
 image:
-  tag: 2025.q1.12-lts
+  tag: "2025.q4.12"
 replicaCount: 2
 resources:
   limits:
