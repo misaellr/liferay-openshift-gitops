@@ -105,11 +105,6 @@ customVolumeMounts:
   - mountPath: /opt/liferay/osgi/configs/com.liferay.portal.search.elasticsearch7.configuration.ElasticsearchConnectionConfiguration-REMOTE.config
     name: liferay-configmap
     subPath: com.liferay.portal.search.elasticsearch7.configuration.ElasticsearchConnectionConfiguration-REMOTE.config
-  x-writable-dirs:
-  - mountPath: /opt/liferay/logs
-    name: liferay-logs
-  - mountPath: /opt/liferay/tomcat/logs
-    name: tomcat-logs
 portalBundleDenyList:
 - com.liferay.portal.search.elasticsearch.cross.cluster.replication.impl
 - com.liferay.portal.search.elasticsearch.monitoring.web
@@ -125,9 +120,4 @@ resources:
     cpu: 100m
     memory: 1Gi
 replicaCount: 1
-customVolumes:
-  x-writable-dirs:
-  - name: liferay-logs
-    emptyDir: {}
-  - name: tomcat-logs
-    emptyDir: {}
+customVolumes: {}
